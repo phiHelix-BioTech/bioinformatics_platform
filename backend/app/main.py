@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -15,6 +17,13 @@ from app.limiter import limiter
 
 
 _DEFAULT_JWT_SECRET = "change-this-secret-in-production"
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        traces_sample_rate=0.2,
+        environment="production" if not settings.DEBUG else "development",
+    )
 
 
 @asynccontextmanager
@@ -67,6 +76,8 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
 @app.get("/health")
