@@ -7,6 +7,7 @@ class AssessmentResult:
     summary: str
     variants: list[dict] = field(default_factory=list)
     report_path: str | None = None
+    report_sha256: str | None = None   # SHA-256 hex digest of the PDF bytes
 
 
 class AssessmentRunner(ABC):

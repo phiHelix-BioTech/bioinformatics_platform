@@ -10,6 +10,7 @@ Layout:
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime
 from typing import Any
@@ -153,8 +154,12 @@ def generate_pdf(
     job_id: str,
     variants: list[dict[str, Any]],
     output_path: str,
-) -> str:
-    """Write the mutation assessment PDF to output_path and return output_path."""
+) -> tuple[str, str]:
+    """Write the mutation assessment PDF to output_path.
+
+    Returns (output_path, sha256_hex) where sha256_hex is the hex digest of
+    the PDF bytes, suitable for tamper-detection / clinical audit.
+    """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     styles = getSampleStyleSheet()
@@ -482,4 +487,9 @@ def generate_pdf(
     ))
 
     doc.build(story)
-    return output_path
+
+    # Compute SHA-256 of the written PDF for tamper-detection / clinical signing
+    with open(output_path, "rb") as fh:
+        pdf_hash = hashlib.sha256(fh.read()).hexdigest()
+
+    return output_path, pdf_hash

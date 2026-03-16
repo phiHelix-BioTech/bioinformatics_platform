@@ -284,13 +284,14 @@ class RealAssessmentRunner(AssessmentRunner):
         # Generate PDF report
         output_path = os.path.join(settings.UPLOADS_DIR, f"assessment-{job_id}.pdf")
         append_log(job_id, f"Generating PDF report → {output_path}")
+        report_path: str | None = None
+        report_sha256: str | None = None
         try:
-            generate_pdf(job_id, annotated, output_path)
-            report_path: str | None = output_path
+            report_path, report_sha256 = generate_pdf(job_id, annotated, output_path)
+            append_log(job_id, f"PDF written — SHA-256: {report_sha256}")
         except Exception as exc:
             logger.error("[assessment] PDF generation failed for %s: %s", job_id, exc)
             append_log(job_id, f"WARNING: PDF generation failed — {exc}")
-            report_path = None
 
         pathogenic    = sum(1 for a in annotated if "pathogenic" in a.get("significance", "").lower())
         hotspot_count = sum(1 for a in annotated if a.get("hotspot"))
@@ -306,6 +307,7 @@ class RealAssessmentRunner(AssessmentRunner):
             summary=summary,
             variants=annotated,
             report_path=report_path,
+            report_sha256=report_sha256,
         )
 
 

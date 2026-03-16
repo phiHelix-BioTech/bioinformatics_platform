@@ -290,6 +290,7 @@ def run_pipeline(self, job_id: str) -> dict:
                 "files":           files,
                 "instance_type":   "local",
                 "runtime_seconds": int(time.time() - assess_start),
+                "report_sha256":   assessment_result.report_sha256,
             }
             append_log(job_id, f"Assessment complete — {len(assessment_result.variants)} variants annotated")
             logger.info("[pipeline] %s assessment done", job_id)
