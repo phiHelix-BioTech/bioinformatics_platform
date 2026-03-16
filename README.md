@@ -1,6 +1,6 @@
 # Bioinformatics Platform
 
-A full-stack, visual bioinformatics pipeline execution platform. Drag-and-drop a pipeline on a canvas, upload your genomic data, pay per run, and get results — all in the browser.
+A full-stack, visual bioinformatics pipeline execution platform built for the Turkish market. Drag-and-drop a pipeline on a canvas, upload your genomic data, pay per run, and get results — all in the browser. Designed for KVKK compliance and hosted on Turkish cloud infrastructure.
 
 ---
 
@@ -11,9 +11,11 @@ A full-stack, visual bioinformatics pipeline execution platform. Drag-and-drop a
 - **nf-core pipelines** — rnaseq, atacseq, methylseq, ampliseq, chipseq, fetchngs
 - **Snakemake workflows** — 4700+ community workflows + 454 wrappers
 - **BioScript** — custom bash script runs inside a Docker image pre-loaded with bio tools
+- **Custom Linux pipelines** — SPAdes, Kraken2, Prokka, IQ-TREE 2, Flye (de novo, metagenomics, annotation, phylogenomics, long-read assembly)
 - **Mutation Assessment** — post-sarek pipeline: annotates VCF variants against 17 public databases and generates a PDF report
+- **CNV/SV analysis** — structural variant parsing from VCF (DEL, DUP, INV, INS, BND, CNV, TRA)
 - **Paired-end FASTQ** — upload R1 + R2 and both get passed to the runner
-- **Pay-per-run billing** — Stripe checkout, cost estimated before every job
+- **Pay-per-run billing** — Stripe (global) or iyzico (Turkey) checkout, cost estimated before every job
 - **Live results** — volcano plots, VCF tables, MultiQC HTML, file lists — auto-detected
 
 ---
@@ -26,10 +28,11 @@ A full-stack, visual bioinformatics pipeline execution platform. Drag-and-drop a
 | Backend | FastAPI + Uvicorn (async) |
 | Job queue | Celery 5 + Redis 7 |
 | Database | PostgreSQL 16 + SQLAlchemy 2 + Alembic |
-| Auth | JWT (python-jose + passlib + bcrypt) |
-| Payments | Stripe Checkout + Webhooks |
-| Cloud runners | AWS Batch (Nextflow 24.10.2, Snakemake 8.20, custom Docker) |
-| Storage | Local filesystem (dev) or AWS S3 (prod) |
+| Auth | JWT + RBAC (roles) + MFA/TOTP (pyotp) |
+| Payments | Stripe Checkout (global) + iyzico (Turkey) |
+| Cloud runners | Turkish cloud VMs (Huawei / Turkcell / CloudSigma) or AWS Batch |
+| Storage | Local filesystem (dev), AWS S3, or Turkish S3-compatible (Huawei OBS / Turkcell nDepo) |
+| Observability | Sentry (error tracking) + Prometheus `/metrics` |
 | Containers | Docker + Docker Compose |
 
 ---
@@ -41,7 +44,7 @@ A full-stack, visual bioinformatics pipeline execution platform. Drag-and-drop a
 - Docker Desktop (or Docker Engine + Docker Compose plugin)
 - 8 GB RAM available for Docker (4 GB minimum)
 
-### Start (demo / debug mode — no AWS, no Stripe needed)
+### Start (demo / debug mode — no cloud credentials needed)
 
 ```bash
 git clone <your-repo-url>
@@ -60,54 +63,38 @@ frontend-1 | ➜  Local:   http://localhost:5173/
 |---------|-----|
 | App | http://localhost:5173 |
 | API | http://localhost:8000 |
-| Swagger docs | http://localhost:8000/docs |
+| API docs | http://localhost:8000/docs |
+| Prometheus metrics | http://localhost:8000/metrics |
 
 Register an account on first visit. Everything works out of the box:
 
 - **Storage** → files saved to a local Docker volume (`/uploads`)
 - **sarek / nf-core** → mock runner returns realistic fake results in ~10 s
 - **Snakemake / BioScript / Custom** → mock runners, no tools installed
-- **Assessment pipeline** → fully real (queries ClinVar, gnomAD, CADD, etc. live over the internet)
-- **Payments** → Stripe is optional; you can create jobs directly via the API without a Stripe key
+- **Assessment pipeline** → fully real (queries ClinVar, gnomAD, CADD, etc. live)
+- **Payments** → Stripe and iyzico are optional; jobs can be created directly via the API
 
 ### Running modes
 
-There are three modes for the sarek/Nextflow runner, controlled by `NEXTFLOW_BACKEND`:
+There are four modes for every runner, controlled by `NEXTFLOW_BACKEND`, `SNAKEMAKE_BACKEND`, and `BIOSCRIPT_BACKEND`:
 
-| Mode | `NEXTFLOW_BACKEND` | What happens | When to use |
-|------|-------------------|-------------|-------------|
-| **Mock** (default) | `mock` | Returns realistic fake VCF/MultiQC data in ~10 s | Demos, UI development, debugging |
-| **Local** | `local` | Runs real `nf-core/sarek` via Docker on your machine | Testing the real pipeline locally |
-| **AWS** | `aws` | Submits to AWS Batch | Production |
-
-To switch modes without editing files, set the variable before `docker compose up`:
+| Mode | Value | What happens | When to use |
+|------|-------|-------------|-------------|
+| **Mock** (default) | `mock` | Returns realistic fake data in ~10 s | Demos, UI development |
+| **Local** | `local` | Runs real pipeline via Docker on your machine | Testing locally |
+| **Turkish cloud** | `turkishcloud` | Spins up an ephemeral VM on Huawei/Turkcell/CloudSigma | Production (Turkey) |
+| **AWS Batch** | `awsbatch` | Submits to AWS Batch | Production (AWS) |
 
 ```bash
 # Demo mode (default — no setup needed)
 docker compose up
 
-# Real local sarek (needs ~100 GB GATK reference files — see below)
-NEXTFLOW_BACKEND=local docker compose up
+# Turkish cloud production
+NEXTFLOW_BACKEND=turkishcloud SNAKEMAKE_BACKEND=turkishcloud docker compose up
+
+# AWS Batch production
+NEXTFLOW_BACKEND=awsbatch SNAKEMAKE_BACKEND=awsbatch docker compose up
 ```
-
-### Running real sarek locally
-
-`NEXTFLOW_BACKEND=local` runs the actual nf-core/sarek pipeline on your laptop/server via Docker. Requirements:
-
-1. **Docker** with at least 16 GB RAM allocated and 200 GB free disk.
-2. **GATK reference bundle** — download GRCh38 resources (~100 GB):
-   ```bash
-   # The pipeline will auto-download on first run via nf-core's iGenomes config.
-   # Or pre-download to a local path and override --genome with a custom genomes.conf.
-   ```
-3. Set in `.env`:
-   ```
-   NEXTFLOW_BACKEND=local
-   NEXTFLOW_PROFILE=docker   # or singularity
-   ```
-4. The first run pulls all the nf-core/sarek Docker images (~20 GB). Subsequent runs are fast.
-
-> **Tip:** For MVP demos, always use mock mode. It's instant and shows the full UI/results flow without any data files.
 
 ### Stop
 
@@ -119,22 +106,11 @@ docker compose down -v       # full reset (wipes all data)
 ### Useful commands
 
 ```bash
-# View all logs
 docker compose logs -f
-
-# View only worker (where pipeline jobs run)
 docker compose logs -f worker
-
-# TypeScript type-check (runs inside container)
 docker compose exec frontend sh -c "cd /app && npx tsc --noEmit"
-
-# Open a backend Python shell
 docker compose exec backend bash
-
-# Run backend tests
 docker compose exec backend pytest tests/ -v
-
-# Restart just the worker (after code changes)
 docker compose restart worker
 ```
 
@@ -142,11 +118,11 @@ docker compose restart worker
 
 | Problem | Fix |
 |---------|-----|
-| Port 5432 already in use | Stop local Postgres, or change `5432:5432` to `5433:5432` in docker-compose.yml |
-| Port 6380 already in use | Change `6380:6379` to another port |
-| Assessment job fails with network errors | The assessment runner calls live public APIs — check your internet connection |
-| `nextflow: not found` in worker logs | Only relevant when `NEXTFLOW_BACKEND=local`; Nextflow is pre-installed in `Dockerfile.worker` |
-| Jobs stuck in `pending` | Worker container crashed — run `docker compose logs worker` to see why |
+| Port 5432 in use | Stop local Postgres or change `5432:5432` in docker-compose.yml |
+| Port 6380 in use | Change `6380:6379` to another port |
+| Assessment job fails with network errors | The assessment runner calls live public APIs — check internet connection |
+| Jobs stuck in `pending` | Worker crashed — run `docker compose logs worker` |
+| Turkish cloud VM never completes | Check `completion/{job_id}/done` exists in object storage; verify provider credentials |
 
 ---
 
@@ -155,59 +131,203 @@ docker compose restart worker
 ```
 bioinformatics_platform/
 ├── backend/
-│   ├── alembic/versions/          # DB migrations (0001 – 0009)
+│   ├── alembic/versions/          # DB migrations (0001 – 0014)
 │   ├── app/
 │   │   ├── api/v1/                # REST routers: auth, uploads, jobs,
-│   │   │   │                      #   pipelines, nfcore, snakemake, payments
-│   │   ├── models/                # SQLAlchemy ORM: User, Job, Pipeline,
-│   │   │   │                      #   NfCorePipeline, NfCoreModule,
-│   │   │   │                      #   SnakemakeWrapper, SnakemakeWorkflow
+│   │   │   │                      #   pipelines, nfcore, snakemake,
+│   │   │   │                      #   payments, iyzico
+│   │   ├── models/                # User, Job, Pipeline, NfCorePipeline,
+│   │   │   │                      #   NfCoreModule, SnakemakeWrapper,
+│   │   │   │                      #   SnakemakeWorkflow, AuditLog,
+│   │   │   │                      #   ConsentRecord
 │   │   ├── schemas/               # Pydantic request / response models
 │   │   ├── services/
-│   │   │   ├── storage/           # local.py + s3.py
-│   │   │   ├── nextflow/          # mock.py + batch.py (AWS Batch)
-│   │   │   ├── snakemake/         # mock.py + batch.py (AWS Batch)
-│   │   │   ├── bioscript/         # mock.py + batch.py (AWS Batch)
+│   │   │   ├── storage/           # local.py + s3.py (S3-endpoint-aware)
+│   │   │   ├── nextflow/          # mock, local, batch (AWS), turkishcloud
+│   │   │   ├── snakemake/         # mock, local, batch (AWS), turkishcloud
+│   │   │   ├── bioscript/         # mock, local, batch (AWS), turkishcloud
+│   │   │   ├── vm_provisioner/    # base, huawei, turkcell, cloudsigma,
+│   │   │   │   │                  #   factory (fallback), runner (shared)
 │   │   │   ├── assessment/        # real.py + databases.py + report.py
-│   │   │   ├── cost_estimator.py
-│   │   │   ├── nfcore_scraper.py
-│   │   │   └── snakemake_scraper.py
+│   │   │   ├── sv_parser.py       # structural variant VCF parser
+│   │   │   ├── audit.py           # fire-and-forget audit log writer
+│   │   │   └── auth.py            # JWT creation/verification + MFA tokens
 │   │   ├── tasks/                 # Celery tasks: pipeline, scrape_*
 │   │   ├── config.py              # All env vars (Pydantic Settings)
-│   │   ├── celery_app.py
-│   │   └── main.py
-│   ├── Dockerfile                 # FastAPI image
-│   ├── Dockerfile.worker          # Celery worker (+ Java 17 + Nextflow + Snakemake)
-│   ├── Dockerfile.tools           # BioScript tools image (samtools, bwa, STAR, etc.)
-│   ├── bioplatform_helpers.sh     # Shell library sourced in BioScript jobs
-│   ├── nextflow_aws.config        # Nextflow AWS Batch config
+│   │   └── main.py                # Sentry init + Prometheus + health check
+│   ├── Dockerfile
+│   ├── Dockerfile.worker          # Java 17 + Nextflow + Snakemake
+│   ├── Dockerfile.tools           # samtools, bwa, STAR, Kraken2, SPAdes…
+│   ├── bioplatform_helpers.sh     # Shell library for BioScript jobs
+│   ├── nextflow_aws.config
+│   ├── .env.example               # All env vars documented
 │   └── requirements.txt
 │
 ├── frontend/
-│   ├── src/
-│   │   ├── api/                   # Axios clients: client, authClient,
-│   │   │   │                      #   pipelineClient, nfcoreClient, snakemakeClient
-│   │   ├── builder/
-│   │   │   ├── nodes/             # InputFileNode, AssessmentNode, BioScriptNode,
-│   │   │   │   │                  #   NfCoreModuleNode, NfCorePipelineNode,
-│   │   │   │   │                  #   SnakemakeWrapperNode, SnakemakeWorkflowNode, …
-│   │   │   ├── PipelineBuilder.tsx
-│   │   │   ├── PipelineToolbar.tsx
-│   │   │   ├── NodePalette.tsx
-│   │   │   ├── Spotlight.tsx      # Cmd+K command palette
-│   │   │   ├── TemplateGallery.tsx
-│   │   │   ├── templates.ts       # pipeline templates incl. sarek + assessment
-│   │   │   ├── validation.ts
-│   │   │   └── useUndoRedo.ts
-│   │   ├── components/            # AuthGate, TierConfirm, JobProgress,
-│   │   │   │                      #   JobHistory, ResultsPanel, ResultViewer, …
-│   │   ├── types/                 # job.ts, auth.ts, snakemake.ts, …
-│   │   └── App.tsx                # Top-level state machine
-│   └── package.json
+│   └── src/
+│       ├── api/
+│       ├── builder/               # Canvas, nodes, validation, templates,
+│       │   │                      #   Spotlight, TemplateGallery, undo/redo
+│       ├── components/            # AuthGate, TierConfirm, JobProgress,
+│       │   │                      #   JobHistory, ResultsPanel, ResultViewer
+│       └── App.tsx
 │
-├── .env.example                   # Copy to .env — all configurable variables
+├── terraform/                     # AWS infra (S3, IAM, Batch, ECR)
+├── .github/workflows/             # CI (ruff+mypy+pytest+tsc) + CD (ECR+S3)
+├── .env.example
 └── docker-compose.yml
 ```
+
+---
+
+## Turkish Cloud Infrastructure
+
+The platform is designed to run compute jobs on Turkish cloud providers to satisfy KVKK data residency requirements for health data. Compute is **ephemeral and per-job** — a VM is created when a job starts and terminated when it finishes. Customers pay only for what they use.
+
+### Provider stack
+
+| Priority | Provider | Location | API | Storage |
+|----------|----------|----------|-----|---------|
+| 1 | **Huawei Cloud** | Istanbul (tr-west-1) | `huaweicloudsdkecs` | Huawei OBS (S3-compatible) |
+| 2 | **Turkcell Bulut** | Istanbul / Ankara / İzmir | VMware vCD (`pyvcloud`) | Turkcell nDepo (S3-compatible) |
+| 3 | **CloudSigma / Siaflex** | İzmir | REST API (no SDK) | Uses whichever OBS/nDepo is configured |
+
+### How fallback works
+
+On each job submission, `COMPUTE_PROVIDERS` (default: `huawei,turkcell,cloudsigma`) is tried in order. The first provider that passes a health check **and** successfully creates an instance is used. If Huawei's API is down or quota is exhausted, Turkcell is tried automatically; then CloudSigma. The pipeline task never needs to know which provider ran the job.
+
+### VM lifecycle
+
+```
+Job submitted
+    │
+    ▼
+factory.get_provisioner_with_fallback()
+    │  tries huawei → turkcell → cloudsigma
+    ▼
+VM created with cloud-init user_data script
+    │
+    ▼  (VM runs independently)
+    │  1. Installs Docker + AWS CLI
+    │  2. Pulls bioplatform/worker image
+    │  3. Runs pipeline (Nextflow / Snakemake / BioScript)
+    │  4. Uploads results to object storage
+    │  5. Writes completion/{job_id}/done or /error marker
+    │  6. shutdown -h now
+    ▼
+Celery task polls object storage every 30 s (max 3 h 45 m)
+    │
+    ▼
+Results collected → VM terminated (always, even on failure)
+```
+
+### Storage for Turkish cloud
+
+Both Huawei OBS and Turkcell nDepo expose an S3-compatible API. Set `S3_ENDPOINT_URL` to switch the storage backend:
+
+```bash
+# Huawei OBS (Turkey)
+S3_ENDPOINT_URL=https://obs.tr-west-1.myhuaweicloud.com
+AWS_ACCESS_KEY_ID=<huawei_ak>
+AWS_SECRET_ACCESS_KEY=<huawei_sk>
+S3_BUCKET=<obs_bucket_name>
+
+# Turkcell nDepo
+S3_ENDPOINT_URL=<ndep0_endpoint_provided_by_turkcell>
+AWS_ACCESS_KEY_ID=<ndep0_access_key>
+AWS_SECRET_ACCESS_KEY=<ndep0_secret_key>
+```
+
+The existing `STORAGE_BACKEND=s3` setting and all download/upload logic works unchanged.
+
+### VM flavors
+
+| Flavor | Huawei ECS | Turkcell vCD | CloudSigma |
+|--------|-----------|-------------|-----------|
+| `small` | c7n.large.4 (2 vCPU / 8 GB) | 2 vCPU / 8 GB | 4 GHz / 8 GB |
+| `standard` | c7n.2xlarge.4 (8 vCPU / 32 GB) | 8 vCPU / 32 GB | 16 GHz / 32 GB |
+| `large` | c7n.4xlarge.4 (16 vCPU / 64 GB) | 16 vCPU / 64 GB | 32 GHz / 64 GB |
+| `xlarge` | m7n.4xlarge.8 (16 vCPU / 128 GB) | 16 vCPU / 128 GB | 48 GHz / 128 GB |
+
+Set `DEFAULT_VM_FLAVOR=standard` (default) or pass `tier` in `workflow_config` per job.
+
+---
+
+## Security & Compliance
+
+### Authentication
+
+- JWT bearer tokens (7-day expiry by default, configurable)
+- RBAC: `role` field on every user — `user`, `clinician`, `admin`
+- MFA/TOTP via `pyotp` — compatible with any authenticator app (Google Authenticator, Authy, etc.)
+  - `POST /auth/mfa/setup` → provisioning URI + QR data
+  - `POST /auth/mfa/verify` → activate MFA with a valid code
+  - `POST /auth/mfa/complete` → exchange MFA token + code for a full JWT (called at login challenge screen)
+  - `DELETE /auth/mfa` → disable
+- Login with MFA enabled returns `mfa_required: true` + a short-lived (5 min) `mfa_token` instead of a full JWT
+
+### RBAC
+
+```python
+from app.api.v1.deps import require_role
+
+@router.delete("/admin/something")
+async def admin_only(user = Depends(require_role("admin"))):
+    ...
+
+@router.post("/clinical/report")
+async def clinician_or_admin(user = Depends(require_role("clinician", "admin"))):
+    ...
+```
+
+### Audit log
+
+Every authentication event, job creation, cancellation, retry, and consent change is written to an append-only `audit_log` table. Writes are fire-and-forget (own DB session, never blocks the request). Logged fields: `user_id`, `action`, `resource_type`, `resource_id`, `ip_address`, `user_agent`, `meta` (JSON), `created_at`.
+
+### KVKK compliance
+
+Turkey's personal data protection law (KVKK) applies to all health data processed on this platform.
+
+- **Consent records** — `POST /auth/consent` records explicit KVKK consent per user per consent type (e.g. `"kvkk"`, `"marketing"`). Upsert semantics; full audit trail.
+- **Data residency** — `data_residency` field on User (default `"TR"`). Turkish cloud infrastructure keeps compute and storage physically in Turkey.
+- **Right to erasure** — `DELETE /auth/me` deletes the user, all their jobs, and queues S3 object deletion (KVKK Article 7 + GDPR Article 17).
+- **VERBİS** — Register your data processing activities at [verbis.kvkk.gov.tr](https://verbis.kvkk.gov.tr) before going live. Health data is a special category under KVKK Article 6 — explicit consent is required.
+
+### BioScript sandboxing
+
+User bash scripts run inside Docker with hard resource limits:
+
+```
+--memory=8g
+--cpus=$(nproc)
+--read-only
+--tmpfs /tmp:exec
+```
+
+In local runner mode, OS-level limits are also applied via `resource.setrlimit`:
+- CPU: 2 hours max
+- Virtual memory: 8 GB
+- File size: 10 GB
+- Processes: 256
+
+---
+
+## Payments
+
+### Stripe (global)
+
+Standard Stripe Checkout flow. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`.
+
+### iyzico (Turkey)
+
+iyzico is a Turkish payment gateway widely used by Turkish businesses. The flow:
+
+1. `POST /payments/iyzico/checkout` — creates a CheckoutFormInitialize and returns the iyzico HTML form snippet + `conversation_token`
+2. Frontend embeds the form; customer completes payment
+3. iyzico POSTs to `POST /payments/iyzico/callback` — signature verified, Job created, `job_id` stored in Redis
+4. Frontend polls `GET /payments/iyzico/session/{token}` to retrieve the `job_id`
+
+Required env vars: `IYZICO_API_KEY`, `IYZICO_SECRET_KEY`. Sandbox URL: `https://sandbox.iyzipay.com` (default). Production: `https://api.iyzipay.com`.
 
 ---
 
@@ -215,196 +335,225 @@ bioinformatics_platform/
 
 | `pipeline_id` | Runner | Backend env var | Notes |
 |---------------|--------|----------------|-------|
-| `"sarek"` | Nextflow | `NEXTFLOW_BACKEND=mock\|local\|aws` | nf-core variant calling; auto-generates samplesheet |
-| other nf-core | Nextflow | `NEXTFLOW_BACKEND=mock\|local\|aws` | rnaseq, atacseq, etc. |
-| `"snakemake"` | Snakemake | `SNAKEMAKE_BACKEND=mock\|aws` | Generates Snakefile from canvas wrappers |
-| `"bioscript"` | BioScript | `BIOSCRIPT_BACKEND=mock\|aws` | Runs user's bash script in tools Docker image |
-| `"assessment"` | Assessment | always real | Annotates sarek VCF against 17 databases; generates PDF |
+| `"sarek"` | Nextflow | `NEXTFLOW_BACKEND` | nf-core variant calling; auto-generates samplesheet |
+| other nf-core | Nextflow | `NEXTFLOW_BACKEND` | rnaseq, atacseq, etc. |
+| `"snakemake"` | Snakemake | `SNAKEMAKE_BACKEND` | Generates Snakefile from canvas wrappers/workflows |
+| `"bioscript"` | BioScript | `BIOSCRIPT_BACKEND` | Runs user's bash script in tools Docker image |
+| `"custom-*"` | Custom | `CUSTOM_BACKEND` | spades, kraken2, prokka, iqtree, flye |
+| `"assessment"` | Assessment | always real | Annotates VCF against 17 databases; generates PDF |
+
+Each runner supports: `mock` → `local` → `turkishcloud` → `awsbatch`
 
 ---
 
 ## Mutation Assessment Pipeline
 
-The Assessment pipeline takes a completed sarek job's VCF output and annotates every variant against 17 public databases. No API key is required for 15 of them; OMIM and Orphanet are optional enhancements.
+The Assessment pipeline takes a completed sarek job's VCF output and annotates every variant against 17 public databases.
 
 ### How to use
 
-1. Run a sarek job first (or select a completed one).
+1. Run a sarek job (or select a completed one).
 2. Drop an **Assessment** node on the canvas and connect it to the sarek Results node.
-3. In the Assessment node, pick the source sarek job from the dropdown.
-4. Submit — no file upload needed. The runner reads variants directly from the sarek job's stored result.
-5. Results: interactive variant table in the UI + downloadable PDF report.
+3. Pick the source job from the dropdown in the Assessment node.
+4. Submit — no file upload needed.
+5. Results: interactive variant table + downloadable PDF report.
 
 ### PDF report contents
 
-- **Summary stats** — total variants, pathogenic/LP count, cancer hotspot count
-- **Classification chart** — bar chart by ACMG bucket
-- **Table A — Clinical Summary** — ClinVar significance, InterVar/ACMG classification + criteria met, gnomAD AF, popmax AF, hotspot flag, rsID
-- **Table B — Computational Scores** — SIFT, PolyPhen-2, CADD phred, REVEL, MetaLR, MetaSVM, MutationTaster, SpliceAI Δmax, GERP++, PhyloP
-- **Table C — Gene Annotations** — protein name + function (UniProt), OMIM disease, ClinGen validity, GenCC, Orphanet diseases, HPO phenotype terms, LOVD variant count
-- **Data sources** and **research-use disclaimer**
+- Summary stats — total variants, pathogenic/LP count, cancer hotspot count
+- Classification chart — bar chart by ACMG bucket
+- **Table A** — ClinVar significance, InterVar/ACMG classification + criteria, gnomAD AF, popmax AF, hotspot flag, rsID
+- **Table B** — SIFT, PolyPhen-2, CADD phred, REVEL, MetaLR, MetaSVM, MutationTaster, SpliceAI Δmax, GERP++, PhyloP
+- **Table C** — protein name + function (UniProt), OMIM disease, ClinGen validity, GenCC, Orphanet diseases, HPO terms, LOVD variant count
 
-### Database sources — full reference
+### Variant-level databases (queried per variant, all free)
 
-#### Variant-level (queried per variant, all free, no key)
+| # | Database | What it provides |
+|---|----------|-----------------|
+| 1 | ClinVar | Pathogenicity classification, HGVS notation |
+| 2 | gnomAD v4.1 | Population allele frequency, popmax AF, AC/AN |
+| 3 | Ensembl VEP | SIFT, PolyPhen-2, consequence terms, canonical transcript |
+| 4 | CADD v1.7 | Phred-scaled deleteriousness score |
+| 5 | MyVariant.info | REVEL, MetaLR, MetaSVM, MutationTaster, GERP++, PhyloP |
+| 6 | SpliceAI | Splice site disruption Δ scores |
+| 7 | InterVar | ACMG/AMP 2015 auto-classification + criteria met |
+| 8 | CancerHotspots.org | Recurrent cancer driver mutation hotspot flag |
+| 9 | dbSNP | rsID fallback |
 
-| # | Database | What it provides | API endpoint |
-|---|----------|-----------------|--------------|
-| 1 | **ClinVar** (NCBI) | Pathogenicity classification, gene symbol, HGVS notation | `eutils.ncbi.nlm.nih.gov/entrez/eutils` |
-| 2 | **gnomAD v4.1** | Population allele frequency, popmax AF across continental groups, AC/AN | `gnomad.broadinstitute.org/api` (GraphQL) |
-| 3 | **Ensembl VEP** | SIFT score + prediction, PolyPhen-2 score + prediction, consequence terms, canonical transcript, HGVS | `rest.ensembl.org/vep/human/region` |
-| 4 | **CADD v1.7** | Phred-scaled combined annotation-dependent depletion score (≥20 = top 1% deleterious) | `cadd.gs.washington.edu/api/v1.0` |
-| 5 | **MyVariant.info** | REVEL, MetaLR, MetaSVM, MutationTaster (pred + score), GERP++ rs score, PhyloP — all from dbNSFP | `myvariant.info/v1/variant` |
-| 6 | **SpliceAI** (Broad) | Splice site disruption Δ scores: acceptor gain/loss, donor gain/loss; max Δ ≥ 0.2 is significant | `spliceailookup-api.broadinstitute.org/spliceai` |
-| 7 | **InterVar** (WinterVar) | ACMG/AMP 2015 auto-classification (Pathogenic/LP/VUS/LB/Benign) + list of met criteria (PVS1, PS1-4, PM1-6…) | `wintervar.wglab.org/api2.php` |
-| 8 | **CancerHotspots.org** | Recurrent cancer driver mutation hotspot flag + type | `cancerhotspots.org/api/hotspots/single` |
-| 9 | **dbSNP** (NCBI) | rsID — used as fallback if ClinVar and gnomAD don't return one | `eutils.ncbi.nlm.nih.gov/entrez/eutils` |
+### Gene-level databases (queried once per gene, cached 7 days)
 
-#### Gene-level (queried once per unique gene, cached, all free, no key)
+| # | Database | What it provides |
+|---|----------|-----------------|
+| 10 | UniProt | Protein name + function |
+| 11 | HGNC | Authoritative gene symbol, Entrez/Ensembl IDs |
+| 12 | ClinGen | Gene-disease validity classification |
+| 13 | GenCC | Aggregated gene-disease classifications |
+| 14 | HPO / Ensembl | Phenotype terms |
+| 15 | LOVD | Locus-specific variant count |
 
-| # | Database | What it provides | API endpoint |
-|---|----------|-----------------|--------------|
-| 10 | **UniProt** | Protein full name, function description (first sentence) | `rest.uniprot.org/uniprotkb/search` |
-| 11 | **HGNC** | Authoritative gene symbol, locus group/type, Entrez ID, Ensembl gene ID, gene family | `rest.genenames.org/fetch/symbol` |
-| 12 | **ClinGen** | Gene-disease validity: Definitive / Strong / Moderate / Limited / No Known Disease, mode of inheritance | `erepo.clinicalgenome.org/evrepo/api/v1/classifications` |
-| 13 | **GenCC** | Aggregated gene-disease classifications from ClinGen, OMIM, Orphanet, PanelApp, and others | `thegencc.org/api/v1/classifications-search` |
-| 14 | **HPO / Ensembl** | Human Phenotype Ontology terms and disease phenotypes associated with the gene | `rest.ensembl.org/phenotype/gene/homo_sapiens` |
-| 15 | **LOVD** | Locus-specific variant database — total variant count for the gene | `api.lovd.nl/v1.0/variants` |
+### Optional (free registration required)
 
-#### Optional gene-level (require free registration)
+| # | Database | How to enable |
+|---|----------|---------------|
+| 16 | OMIM | Set `OMIM_API_KEY` — register at [omim.org/api](https://www.omim.org/api) |
+| 17 | Orphanet | Set `ORPHANET_API_KEY` — register at [orphacode.org](https://api.orphacode.org) |
 
-| # | Database | What it provides | How to enable |
-|---|----------|-----------------|---------------|
-| 16 | **OMIM** | Gene-disease relationship, preferred disease title, inheritance pattern | Register at [omim.org/api](https://www.omim.org/api), set `OMIM_API_KEY=` in `.env` |
-| 17 | **Orphanet** | Rare disease associations for the gene (up to 5 diseases with ORPHAcode) | Register at [orphacode.org](https://api.orphacode.org), set `ORPHANET_API_KEY=` in `.env` |
+---
 
-### Databases that can be added via bulk download (not yet integrated)
+## API Overview
 
-These are not queried live but can be incorporated as local flat-file lookups in a future version:
+All endpoints under `/api/v1`. JWT required in `Authorization: Bearer <token>` except auth and webhooks.
 
-| Database | What it adds | How to download | Notes |
-|----------|-------------|-----------------|-------|
-| **dbNSFP** | Full dbNSFP scores offline (REVEL, MetaLR, MetaSVM, PROVEAN, SIFT, PolyPhen, MutationTaster, etc.) for every possible SNV | [sites.google.com/site/jpopgen/dbNSFP](https://sites.google.com/site/jpopgen/dbNSFP) | ~100 GB; academic free; useful for offline / air-gapped deployments |
-| **DGV** (Database of Genomic Variants) | Structural variant population database | [dgv.tcag.ca/dgv/app/downloads](http://dgv.tcag.ca/dgv/app/downloads) | BED/VCF for GRCh38; free |
-| **MONDO** | Disease ontology — maps disease names across OMIM, Orphanet, DOID, MeSH | [github.com/monarch-initiative/mondo](https://github.com/monarch-initiative/mondo) | OBO + JSON format; free |
-| **DECIPHER** | Rare disease genomic variants + patient phenotypes | Apply at [decipher.sanger.ac.uk/data](https://decipher.sanger.ac.uk/data) | Data Access Agreement required; free for research |
-| **HGMD** (Human Gene Mutation Database) | Comprehensive curated disease-causing mutations | [portal.biobase-international.com](https://portal.biobase-international.com) | Commercial licence; academic pricing available |
-| **MaxEntScan** | Splice site strength scoring algorithm | [genes.mit.edu/burgelab/maxent/Xmaxentscan_scoreseq.html](http://genes.mit.edu/burgelab/maxent/Xmaxentscan_scoreseq.html) | Perl script; run locally |
+```
+# Auth
+POST   /auth/register                 Register
+POST   /auth/login                    Login → JWT (or mfa_required + mfa_token)
+GET    /auth/me                       Current user
+DELETE /auth/me                       Delete account (KVKK right to erasure)
+POST   /auth/mfa/setup                Generate TOTP secret + provisioning URI
+POST   /auth/mfa/verify               Activate MFA with first valid code
+POST   /auth/mfa/complete             Exchange mfa_token + code → full JWT
+DELETE /auth/mfa                      Disable MFA
+POST   /auth/consent                  Record KVKK/GDPR consent
+GET    /auth/consent                  List consent records
 
-> **Note on superseded databases:** 1000 Genomes, ExAC, ESP, TOPMed, and UK10K are all population frequency databases whose data is fully incorporated into gnomAD v4.1, which we already query. No separate integration is needed.
+# Uploads
+POST   /uploads/presign               Presigned upload URL + cost estimate
+GET    /uploads/estimate              Cost estimate
+GET    /uploads/local/{filename}      Serve local file (PDF reports etc.)
+
+# Jobs
+GET    /jobs                          List jobs (last 50)
+POST   /jobs                          Create + dispatch job
+GET    /jobs/{id}                     Job details + result
+DELETE /jobs/{id}                     Cancel job
+POST   /jobs/{id}/retry               Retry failed/cancelled job
+GET    /jobs/{id}/logs?offset=N       Stream log lines
+GET    /jobs/{id}/download?path=…     Presigned S3 download URL
+GET    /jobs/{id}/vcf                 Paginated VCF variant table
+GET    /jobs/{id}/sv                  Structural variant / CNV records
+
+# Pipelines
+GET    /pipelines                     List saved pipeline graphs
+POST   /pipelines                     Save pipeline graph
+GET/PUT/DELETE /pipelines/{id}
+
+# Catalogs
+GET    /nfcore/pipelines              nf-core pipeline catalog
+GET    /nfcore/modules                nf-core module catalog
+POST   /nfcore/refresh
+GET    /snakemake/wrappers
+GET    /snakemake/workflows
+POST   /snakemake/refresh
+
+# Payments
+POST   /payments/checkout             Stripe checkout session
+POST   /payments/webhook              Stripe webhook
+GET    /payments/session/{id}         Poll for job_id after Stripe redirect
+POST   /payments/iyzico/checkout      iyzico CheckoutFormInitialize
+POST   /payments/iyzico/callback      iyzico result callback
+GET    /payments/iyzico/session/{token} Poll for job_id after iyzico payment
+
+# System
+GET    /health                        DB + Redis connectivity check
+GET    /metrics                       Prometheus metrics (text/plain)
+```
 
 ---
 
 ## Environment Variables
 
-All variables can be set in a `.env` file at the project root (copy from `.env.example`).
+Copy `backend/.env.example` to `.env`. Key groups:
 
-### Core (always needed)
+### Core
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_USER` | `bioplatform` | Database username |
-| `POSTGRES_PASSWORD` | `bioplatform` | Database password |
-| `POSTGRES_DB` | `bioplatform` | Database name |
 | `JWT_SECRET` | `changeme-…` | **Change in production.** Min 32 random chars. |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins |
+| `MFA_ISSUER` | `BioplatformMD` | Issuer name shown in authenticator apps |
+| `DEBUG` | `true` | Set `false` in production (enforces JWT_SECRET check) |
+
+### Runners
+
+| Variable | Default | Options |
+|----------|---------|---------|
+| `NEXTFLOW_BACKEND` | `mock` | `mock`, `local`, `awsbatch`, `turkishcloud` |
+| `SNAKEMAKE_BACKEND` | `mock` | `mock`, `local`, `awsbatch`, `turkishcloud` |
+| `BIOSCRIPT_BACKEND` | `mock` | `mock`, `local`, `awsbatch`, `turkishcloud` |
+
+### Turkish cloud compute
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COMPUTE_PROVIDERS` | `huawei,turkcell,cloudsigma` | Priority-ordered fallback list |
+| `DEFAULT_VM_FLAVOR` | `standard` | `small`, `standard`, `large`, `xlarge` |
+| `S3_ENDPOINT_URL` | `` | Huawei OBS or Turkcell nDepo endpoint |
+| `HUAWEI_AK` | `` | Huawei Cloud Access Key |
+| `HUAWEI_SK` | `` | Huawei Cloud Secret Key |
+| `HUAWEI_PROJECT_ID` | `` | Huawei IAM project ID |
+| `HUAWEI_REGION` | `tr-west-1` | Huawei region |
+| `HUAWEI_VPC_ID` | `` | VPC for VM instances |
+| `HUAWEI_SUBNET_ID` | `` | Subnet for VM instances |
+| `HUAWEI_SECURITY_GROUP_ID` | `` | Security group |
+| `HUAWEI_IMAGE_ID` | `` | Ubuntu 22.04 base image ID in tr-west-1 |
+| `HUAWEI_FLAVOR_DEFAULT` | `c7n.2xlarge.4` | Default ECS flavor |
+| `HUAWEI_OBS_ENDPOINT` | `https://obs.tr-west-1.myhuaweicloud.com` | OBS storage endpoint |
+| `TURKCELL_VCD_URL` | `https://svm.turkcellbulut.com` | vCloud Director URL |
+| `TURKCELL_VCD_ORG` | `` | vCD organisation name |
+| `TURKCELL_VCD_VDC` | `` | Virtual Datacenter name |
+| `TURKCELL_VCD_USER` | `` | vCD username |
+| `TURKCELL_VCD_PASSWORD` | `` | vCD password |
+| `TURKCELL_VCD_NETWORK` | `` | Org network name |
+| `TURKCELL_VCD_CATALOG` | `` | Catalog containing VM template |
+| `TURKCELL_VCD_TEMPLATE` | `` | VM template name (Ubuntu 22.04) |
+| `TURKCELL_NDEP0_ENDPOINT` | `` | nDepo S3-compatible storage endpoint |
+| `TURKCELL_NDEP0_ACCESS_KEY` | `` | nDepo access key |
+| `TURKCELL_NDEP0_SECRET_KEY` | `` | nDepo secret key |
+| `CLOUDSIGMA_API_ENDPOINT` | `https://siaflex.cloud/api/2.0` | CloudSigma/Siaflex API |
+| `CLOUDSIGMA_USERNAME` | `` | CloudSigma email |
+| `CLOUDSIGMA_PASSWORD` | `` | CloudSigma password |
 
 ### Storage
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STORAGE_BACKEND` | `local` | `local` or `s3` |
-| `AWS_ACCESS_KEY_ID` | `` | Required when `STORAGE_BACKEND=s3` |
-| `AWS_SECRET_ACCESS_KEY` | `` | Required when `STORAGE_BACKEND=s3` |
-| `AWS_REGION` | `us-east-1` | AWS region |
-| `S3_BUCKET` | `` | S3 bucket name |
+| `S3_ENDPOINT_URL` | `` | Override for Turkish-cloud S3-compatible storage |
+| `AWS_ACCESS_KEY_ID` | `` | AK for S3 / Huawei OBS / Turkcell nDepo |
+| `AWS_SECRET_ACCESS_KEY` | `` | SK |
+| `S3_BUCKET` | `` | Bucket name |
 
-### Runners
+### Payments
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NEXTFLOW_BACKEND` | `mock` | `mock`, `local`, or `awsbatch` |
-| `NEXTFLOW_PROFILE` | `docker` | `docker` or `singularity` (local mode only) |
-| `SNAKEMAKE_BACKEND` | `mock` | `mock` or `awsbatch` |
-| `BIOSCRIPT_BACKEND` | `mock` | `mock` or `awsbatch` |
+| `STRIPE_SECRET_KEY` | `` | `sk_test_…` or `sk_live_…` |
+| `STRIPE_WEBHOOK_SECRET` | `` | `whsec_…` |
+| `IYZICO_API_KEY` | `` | iyzico merchant API key |
+| `IYZICO_SECRET_KEY` | `` | iyzico merchant secret |
+| `IYZICO_BASE_URL` | `https://sandbox.iyzipay.com` | Use `https://api.iyzipay.com` in production |
+| `IYZICO_USD_TO_TRY_RATE` | `33.0` | USD→TRY conversion rate |
+
+### Observability
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SENTRY_DSN` | `` | Leave empty to disable. Get from sentry.io |
 
 ### Mutation Assessment
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ASSESSMENT_GENOME` | `hg38` | Genome build for gnomAD / VEP / CADD / InterVar (`hg19` or `hg38`) |
-| `OMIM_API_KEY` | `` | Optional. Free academic key from [omim.org/api](https://www.omim.org/api). Enables OMIM gene-disease data in reports. |
-| `ORPHANET_API_KEY` | `` | Optional. Free key from [orphacode.org](https://api.orphacode.org). Enables rare disease annotations. |
-
-### AWS Batch
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BATCH_JOB_QUEUE` | `bioplatform-default` | Batch job queue name |
-| `BATCH_JOB_ROLE_ARN` | `` | IAM role ARN for Batch job containers |
-| `SNAKEMAKE_BATCH_QUEUE` | `` | Snakemake queue (falls back to `BATCH_JOB_QUEUE`) |
-| `SNAKEMAKE_CONTAINER_IMAGE` | `snakemake/snakemake:v8.20.0` | Snakemake Docker image |
-| `BIOSCRIPT_DOCKER_IMAGE` | `bioplatform/tools:latest` | BioScript tools image |
-
-### Stripe
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `STRIPE_SECRET_KEY` | `` | Stripe secret key (`sk_test_…` or `sk_live_…`) |
-| `STRIPE_WEBHOOK_SECRET` | `` | Stripe webhook signing secret (`whsec_…`) |
-| `APP_BASE_URL` | `http://localhost:5173` | Frontend URL (Stripe redirect target) |
-
----
-
-## API Overview
-
-All endpoints are under `/api/v1`. JWT required in `Authorization: Bearer <token>` header except for auth and webhook routes.
-
-```
-POST   /auth/register                        Register a new user
-POST   /auth/login                           Login, get JWT token
-GET    /auth/me                              Current user info
-
-POST   /uploads/presign                      Get presigned upload URL + cost estimate
-GET    /uploads/estimate                     Cost estimate by pipeline + samples
-GET    /uploads/local/{filename}             Serve locally stored file (e.g. PDF reports)
-
-GET    /jobs                                 List your jobs (last 50)
-POST   /jobs                                 Create job + dispatch Celery task
-GET    /jobs/{job_id}                        Job details + result
-DELETE /jobs/{job_id}                        Cancel job
-POST   /jobs/{job_id}/retry                  Retry failed/cancelled job
-GET    /jobs/{job_id}/logs                   Stream log lines (?offset=N)
-GET    /jobs/{job_id}/download               Presign S3 download URL (?path=s3://…)
-
-GET    /pipelines                            List saved pipelines
-POST   /pipelines                            Save pipeline graph
-GET    /pipelines/{id}                       Get pipeline
-PUT    /pipelines/{id}                       Update pipeline
-DELETE /pipelines/{id}                       Delete pipeline
-
-GET    /nfcore/pipelines                     nf-core pipeline catalog
-GET    /nfcore/modules                       nf-core module catalog
-GET    /nfcore/categories                    Module categories
-GET    /nfcore/status                        Catalog status (count + ready flag)
-POST   /nfcore/refresh                       Re-scrape catalog (background)
-
-GET    /snakemake/wrappers                   Snakemake wrappers catalog
-GET    /snakemake/wrapper-categories         Wrapper categories
-GET    /snakemake/workflows                  Snakemake workflows catalog
-GET    /snakemake/status                     Catalog status
-POST   /snakemake/refresh                    Re-scrape catalog
-
-POST   /payments/checkout                    Create Stripe checkout session
-POST   /payments/webhook                     Stripe webhook (no auth — signature verified)
-GET    /payments/session/{session_id}        Poll for job_id after Stripe redirect
-```
+| `ASSESSMENT_GENOME` | `hg38` | `hg19` or `hg38` |
+| `OMIM_API_KEY` | `` | Optional — [omim.org/api](https://www.omim.org/api) |
+| `ORPHANET_API_KEY` | `` | Optional — [orphacode.org](https://api.orphacode.org) |
 
 ---
 
 ## BioScript Shell Helpers
 
-When using the BioScript node, the following functions are pre-loaded inside the container:
+Pre-loaded functions inside the BioScript container:
 
 ```bash
 bioplatform_qc          <input.fastq.gz> <outdir> [r2.fastq.gz]
@@ -413,15 +562,19 @@ bioplatform_star_align  <reads.fastq.gz> <star_index_dir> <outdir> [r2]
 bioplatform_call        <input.bam> <genome.fa> <outdir>
 bioplatform_featurecount <bam> <gtf> <outdir>
 bioplatform_multiqc     <results_dir> <outdir>
-bioplatform_s3_sync_out <local_dir> <s3_prefix>
+bioplatform_spades      <r1.fastq.gz> <outdir> [r2.fastq.gz]
+bioplatform_kraken2     <r1.fastq.gz> <db_dir> <outdir> [r2.fastq.gz]
+bioplatform_prokka      <assembly.fasta> <outdir>
+bioplatform_iqtree      <alignment.fasta> <outdir>
+bioplatform_flye        <reads.fastq.gz> <outdir>
 ```
 
-Environment variables available to every BioScript job:
+Available env vars in every BioScript job:
 
 ```bash
-$INPUT_FILE    # S3 URI of the uploaded input file
-$OUTPUT_DIR    # S3 prefix where outputs should be written
-$JOB_ID        # Unique job identifier
+$INPUT_FILE    # storage URI of the uploaded input file
+$OUTPUT_DIR    # storage prefix where outputs should be written
+$JOB_ID        # unique job identifier
 ```
 
 ---
@@ -441,6 +594,11 @@ Migrations run automatically at startup (`alembic upgrade head`).
 | 0007 | Create users table; add user_id to jobs + pipelines |
 | 0008 | Add stripe_session_id to jobs |
 | 0009 | Add storage_key_r2 + workflow_config to jobs |
+| 0010 | Add job_name to jobs |
+| 0011 | Add role to users (RBAC) |
+| 0012 | Create audit_log table |
+| 0013 | Add mfa_secret, mfa_enabled, data_residency to users |
+| 0014 | Create consent_records table (KVKK) |
 
 ---
 
