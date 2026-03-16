@@ -32,6 +32,10 @@ def get_snakemake_runner() -> SnakemakeRunner:
         from app.services.snakemake.batch import AWSBatchSnakemakeRunner
         return AWSBatchSnakemakeRunner()
 
+    if settings.SNAKEMAKE_BACKEND == "turkishcloud":
+        from app.services.snakemake.turkishcloud import TurkishCloudSnakemakeRunner
+        return TurkishCloudSnakemakeRunner()
+
     raise NotImplementedError(
         f"Snakemake backend '{settings.SNAKEMAKE_BACKEND}' is not implemented."
     )

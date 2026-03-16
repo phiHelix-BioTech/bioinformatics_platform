@@ -6,12 +6,17 @@ from app.services.storage.base import StorageBackend
 
 
 def _client():
-    return boto3.client(
-        "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    kwargs: dict = {
+        "region_name":           settings.AWS_REGION,
+        "aws_access_key_id":     settings.AWS_ACCESS_KEY_ID or None,
+        "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY or None,
+    }
+    # S3_ENDPOINT_URL enables Turkish-cloud S3-compatible storage
+    # (Huawei OBS: https://obs.tr-west-1.myhuaweicloud.com,
+    #  Turkcell nDepo: provided at account creation)
+    if settings.S3_ENDPOINT_URL:
+        kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
+    return boto3.client("s3", **kwargs)
 
 
 class S3StorageBackend(StorageBackend):

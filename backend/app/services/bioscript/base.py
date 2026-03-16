@@ -34,6 +34,10 @@ def get_bioscript_runner() -> BioScriptRunner:
         from app.services.bioscript.batch import AWSBatchBioScriptRunner
         return AWSBatchBioScriptRunner()
 
+    if settings.BIOSCRIPT_BACKEND == "turkishcloud":
+        from app.services.bioscript.turkishcloud import TurkishCloudBioScriptRunner
+        return TurkishCloudBioScriptRunner()
+
     raise NotImplementedError(
         f"BioScript backend '{settings.BIOSCRIPT_BACKEND}' is not implemented."
     )

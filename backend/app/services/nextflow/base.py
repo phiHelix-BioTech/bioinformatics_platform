@@ -26,5 +26,9 @@ def get_nextflow_runner() -> NextflowRunner:
         from app.services.nextflow.local import LocalNextflowRunner
         return LocalNextflowRunner()
 
+    if settings.NEXTFLOW_BACKEND == "turkishcloud":
+        from app.services.nextflow.turkishcloud import TurkishCloudNextflowRunner
+        return TurkishCloudNextflowRunner()
+
     from app.services.nextflow.mock import MockNextflowRunner
     return MockNextflowRunner()
