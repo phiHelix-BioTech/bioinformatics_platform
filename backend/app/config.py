@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     # Backend injection via env vars
     STORAGE_BACKEND: str = "local"       # local | s3
     EC2_BACKEND: str = "mock"            # mock | aws
-    NEXTFLOW_BACKEND: str = "mock"       # mock | local | aws
+    NEXTFLOW_BACKEND: str = "mock"       # mock | local | awsbatch | turkishcloud
     NEXTFLOW_PROFILE: str = "docker"     # docker | singularity (local mode only)
-    SNAKEMAKE_BACKEND: str = "mock"      # mock | aws
-    BIOSCRIPT_BACKEND: str = "mock"      # mock | aws
-    CUSTOM_BACKEND: str = "mock"         # mock | aws
+    SNAKEMAKE_BACKEND: str = "mock"      # mock | local | awsbatch | turkishcloud
+    BIOSCRIPT_BACKEND: str = "mock"      # mock | local | awsbatch | turkishcloud
+    CUSTOM_BACKEND: str = "mock"         # mock | awsbatch
 
     # Genome build used for gnomAD / VEP / CADD lookups
     ASSESSMENT_GENOME: str = "hg38"      # hg19 | hg38
@@ -34,6 +34,46 @@ class Settings(BaseSettings):
 
     # Public base URL for generating upload URLs (used by local backend only)
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+
+    # S3-compatible endpoint override (Huawei OBS, Turkcell nDepo, MinIO, etc.)
+    # Leave empty for native AWS S3.
+    S3_ENDPOINT_URL: str = ""
+
+    # Turkish cloud compute — provider priority list (comma-separated)
+    COMPUTE_PROVIDERS: str = "huawei,turkcell,cloudsigma"
+
+    # Default VM flavor when not specified by the job tier
+    DEFAULT_VM_FLAVOR: str = "standard"
+
+    # Huawei Cloud ECS — Turkey North (tr-west-1)
+    HUAWEI_AK: str = ""
+    HUAWEI_SK: str = ""
+    HUAWEI_PROJECT_ID: str = ""
+    HUAWEI_REGION: str = "tr-west-1"
+    HUAWEI_VPC_ID: str = ""
+    HUAWEI_SUBNET_ID: str = ""
+    HUAWEI_SECURITY_GROUP_ID: str = ""
+    HUAWEI_IMAGE_ID: str = ""            # Ubuntu 22.04 base image ID in tr-west-1
+    HUAWEI_FLAVOR_DEFAULT: str = "c7n.2xlarge.4"   # 8 vCPU / 32 GB
+    HUAWEI_OBS_ENDPOINT: str = "https://obs.tr-west-1.myhuaweicloud.com"
+
+    # Turkcell Bulut — VMware vCloud Director
+    TURKCELL_VCD_URL: str = "https://svm.turkcellbulut.com"
+    TURKCELL_VCD_ORG: str = ""
+    TURKCELL_VCD_VDC: str = ""           # Virtual Datacenter name
+    TURKCELL_VCD_USER: str = ""
+    TURKCELL_VCD_PASSWORD: str = ""
+    TURKCELL_VCD_NETWORK: str = ""       # Org network name
+    TURKCELL_VCD_CATALOG: str = ""       # Catalog containing the VM template
+    TURKCELL_VCD_TEMPLATE: str = ""      # VM template name (Ubuntu 22.04)
+    TURKCELL_NDEP0_ENDPOINT: str = ""    # nDepo S3-compatible endpoint
+    TURKCELL_NDEP0_ACCESS_KEY: str = ""
+    TURKCELL_NDEP0_SECRET_KEY: str = ""
+
+    # CloudSigma / Siaflex — Izmir, Turkey
+    CLOUDSIGMA_API_ENDPOINT: str = "https://siaflex.cloud/api/2.0"
+    CLOUDSIGMA_USERNAME: str = ""        # email address
+    CLOUDSIGMA_PASSWORD: str = ""
 
     # AWS / S3
     AWS_ACCESS_KEY_ID: str = ""

@@ -27,6 +27,12 @@ email-validator==2.2.0
 # AWS
 boto3==1.35.85
 
+# Turkish cloud providers
+huaweicloudsdkcore>=3.1.0
+huaweicloudsdkecs>=3.1.0
+pyvcloud>=23.0.0
+# cloudsigma uses plain requests (already listed below)
+
 # Payments
 stripe==7.13.0
 iyzipay==2.0.5
