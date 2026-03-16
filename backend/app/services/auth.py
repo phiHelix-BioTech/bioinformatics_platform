@@ -1,4 +1,5 @@
-"""JWT creation/verification and password hashing."""
+"""JWT creation/verification, password hashing, and refresh tokens."""
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -28,6 +29,31 @@ def create_access_token(
     if purpose != "access":
         claims["purpose"] = purpose
     return jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def _redis():
+    import redis as redis_lib
+    return redis_lib.Redis.from_url(settings.CELERY_BROKER_URL, decode_responses=True)
+
+
+# ── Refresh tokens (stored in Redis) ────────────────────────────────────────
+
+def create_refresh_token(user_id: str) -> str:
+    """Generate a cryptographically random refresh token and store it in Redis."""
+    token = secrets.token_urlsafe(48)
+    ttl = settings.JWT_REFRESH_EXPIRY_DAYS * 86400
+    _redis().setex(f"refresh:{token}", ttl, user_id)
+    return token
+
+
+def verify_refresh_token(token: str) -> str | None:
+    """Return user_id if the refresh token is valid, else None."""
+    return _redis().get(f"refresh:{token}")
+
+
+def revoke_refresh_token(token: str) -> None:
+    """Invalidate a refresh token (logout)."""
+    _redis().delete(f"refresh:{token}")
 
 
 def decode_access_token(token: str, purpose: str = "access") -> dict | None:

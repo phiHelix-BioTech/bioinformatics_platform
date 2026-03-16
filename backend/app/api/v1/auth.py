@@ -1,5 +1,6 @@
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -15,7 +16,14 @@ from app.limiter import limiter
 from app.models.consent_record import ConsentRecord
 from app.models.user import User
 from app.services.audit import log_audit, _ip, _ua
-from app.services.auth import create_access_token, hash_password, verify_password
+from app.services.auth import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    revoke_refresh_token,
+    verify_password,
+    verify_refresh_token,
+)
 
 router = APIRouter()
 
@@ -37,9 +45,23 @@ class UserOut(BaseModel):
 
 class TokenOut(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     mfa_required: bool = False
     mfa_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 
 class MfaSetupOut(BaseModel):
@@ -82,15 +104,35 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
 
+    verification_token = secrets.token_urlsafe(32)
     user = User(
         id=str(uuid.uuid4()),
         email=body.email.lower().strip(),
         hashed_password=hash_password(body.password),
+        email_verified=False,
+        email_verification_token=verification_token,
         created_at=datetime.now(timezone.utc),
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    # Send verification email (best-effort)
+    try:
+        from app.services.email import send_email
+        verify_url = f"{settings.APP_BASE_URL}/verify-email?token={verification_token}"
+        send_email(
+            to=user.email,
+            subject="Verify your Bioplatform account",
+            body=(
+                f"Please verify your email address by clicking the link below:\n\n"
+                f"{verify_url}\n\n"
+                f"This link expires in 24 hours."
+            ),
+        )
+    except Exception:
+        pass  # non-fatal
+
     await log_audit("auth.register", user_id=user.id, resource_type="user", resource_id=user.id,
                     ip_address=_ip(request), user_agent=_ua(request))
     return user
@@ -107,14 +149,45 @@ async def login(
         select(User).where(User.email == form.username.lower().strip())
     )
     user = result.scalar_one_or_none()
-    if not user or not verify_password(form.password, user.hashed_password):
+
+    _bad_creds_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Incorrect email or password.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if not user:
         await log_audit("auth.login_failed", ip_address=_ip(request), user_agent=_ua(request),
                         meta={"email": form.username.lower().strip()})
+        raise _bad_creds_exc
+
+    # Account lockout check
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password.",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Account locked due to too many failed login attempts. "
+                f"Try again after {user.locked_until.strftime('%H:%M UTC')} "
+                f"or reset your password."
+            ),
         )
+
+    if not verify_password(form.password, user.hashed_password):
+        user.failed_login_attempts += 1
+        if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS:
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=settings.LOCKOUT_MINUTES)
+            user.failed_login_attempts = 0
+        await db.commit()
+        await log_audit("auth.login_failed", ip_address=_ip(request), user_agent=_ua(request),
+                        meta={"email": form.username.lower().strip(),
+                              "attempts": user.failed_login_attempts})
+        raise _bad_creds_exc
+
+    # Successful login — reset lockout state
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.commit()
+
     await log_audit("auth.login", user_id=user.id, resource_type="user", resource_id=user.id,
                     ip_address=_ip(request), user_agent=_ua(request))
 
@@ -123,7 +196,11 @@ async def login(
         mfa_token = create_access_token(user.id, expires_minutes=5, purpose="mfa")
         return TokenOut(access_token="", mfa_required=True, mfa_token=mfa_token)
 
-    return TokenOut(access_token=create_access_token(user.id))
+    refresh_token = create_refresh_token(user.id)
+    return TokenOut(
+        access_token=create_access_token(user.id),
+        refresh_token=refresh_token,
+    )
 
 
 @router.get("/me", response_model=UserOut)
@@ -301,3 +378,107 @@ async def get_consents(
         select(ConsentRecord).where(ConsentRecord.user_id == current_user.id)
     )
     return result.scalars().all()
+
+
+# ── Email verification ─────────────────────────────────────────────────────
+
+@router.get("/verify-email", status_code=200)
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify email address via token sent on registration."""
+    result = await db.execute(
+        select(User).where(User.email_verification_token == token)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(400, "Invalid or expired verification token.")
+    user.email_verified = True
+    user.email_verification_token = None
+    await db.commit()
+    return {"message": "Email verified successfully."}
+
+
+# ── Password reset ─────────────────────────────────────────────────────────
+
+@router.post("/forgot-password", status_code=202)
+@limiter.limit("5/minute")
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a password-reset email. Always returns 202 to prevent email enumeration."""
+    result = await db.execute(
+        select(User).where(User.email == body.email.lower().strip())
+    )
+    user = result.scalar_one_or_none()
+    if user:
+        reset_token = secrets.token_urlsafe(32)
+        user.password_reset_token = reset_token
+        user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        await db.commit()
+        try:
+            from app.services.email import send_email
+            reset_url = f"{settings.APP_BASE_URL}/reset-password?token={reset_token}"
+            send_email(
+                to=user.email,
+                subject="Reset your Bioplatform password",
+                body=(
+                    f"You requested a password reset. Click the link below:\n\n"
+                    f"{reset_url}\n\n"
+                    f"This link expires in 1 hour. If you did not request this, ignore this email."
+                ),
+            )
+        except Exception:
+            pass  # non-fatal
+    return {"message": "If that email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password", status_code=200)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a new password using a reset token."""
+    if len(body.new_password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters.")
+    result = await db.execute(
+        select(User).where(User.password_reset_token == body.token)
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.password_reset_expires:
+        raise HTTPException(400, "Invalid or expired reset token.")
+    if user.password_reset_expires < datetime.now(timezone.utc):
+        raise HTTPException(400, "Reset token has expired. Please request a new one.")
+    user.hashed_password = hash_password(body.new_password)
+    user.password_reset_token = None
+    user.password_reset_expires = None
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    await db.commit()
+    return {"message": "Password reset successfully."}
+
+
+# ── Refresh token ──────────────────────────────────────────────────────────
+
+@router.post("/refresh", response_model=TokenOut)
+async def refresh_access_token(body: RefreshRequest):
+    """Exchange a valid refresh token for a new access token."""
+    user_id = verify_refresh_token(body.refresh_token)
+    if not user_id:
+        raise HTTPException(401, "Invalid or expired refresh token.")
+    # Rotate: revoke old token, issue new pair
+    revoke_refresh_token(body.refresh_token)
+    new_refresh = create_refresh_token(user_id)
+    return TokenOut(
+        access_token=create_access_token(user_id),
+        refresh_token=new_refresh,
+    )
+
+
+@router.post("/logout", status_code=204)
+async def logout(body: RefreshRequest):
+    """Revoke the refresh token (client should also discard the access token)."""
+    revoke_refresh_token(body.refresh_token)
