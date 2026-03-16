@@ -46,6 +46,14 @@ services:
       UPLOADS_DIR: /uploads
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
       JWT_SECRET: ${JWT_SECRET:-changeme-replace-in-production-with-a-random-secret}
+      JWT_ACCESS_EXPIRY_MINUTES: ${JWT_ACCESS_EXPIRY_MINUTES:-15}
+      JWT_REFRESH_EXPIRY_DAYS: ${JWT_REFRESH_EXPIRY_DAYS:-7}
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      LOCKOUT_MINUTES: ${LOCKOUT_MINUTES:-30}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-10737418240}
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+      RAW_FILE_RETENTION_DAYS: ${RAW_FILE_RETENTION_DAYS:-30}
+      REPORT_RETENTION_DAYS: ${REPORT_RETENTION_DAYS:-1825}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
@@ -123,6 +131,14 @@ services:
       CUSTOM_BACKEND: ${CUSTOM_BACKEND:-mock}
       UPLOADS_DIR: /uploads
       JWT_SECRET: ${JWT_SECRET:-changeme-replace-in-production-with-a-random-secret}
+      JWT_ACCESS_EXPIRY_MINUTES: ${JWT_ACCESS_EXPIRY_MINUTES:-15}
+      JWT_REFRESH_EXPIRY_DAYS: ${JWT_REFRESH_EXPIRY_DAYS:-7}
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-5}
+      LOCKOUT_MINUTES: ${LOCKOUT_MINUTES:-30}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-10737418240}
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+      RAW_FILE_RETENTION_DAYS: ${RAW_FILE_RETENTION_DAYS:-30}
+      REPORT_RETENTION_DAYS: ${REPORT_RETENTION_DAYS:-1825}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
@@ -174,6 +190,32 @@ services:
       redis:
         condition: service_healthy
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-bioplatform}:${POSTGRES_PASSWORD:-bioplatform}@postgres:5432/${POSTGRES_DB:-bioplatform}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      UPLOADS_DIR: /uploads
+      JWT_SECRET: ${JWT_SECRET:-changeme-replace-in-production-with-a-random-secret}
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+      RAW_FILE_RETENTION_DAYS: ${RAW_FILE_RETENTION_DAYS:-30}
+      REPORT_RETENTION_DAYS: ${REPORT_RETENTION_DAYS:-1825}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+    volumes:
+      - uploads_data:/uploads
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
 
   frontend:
     build: ./frontend

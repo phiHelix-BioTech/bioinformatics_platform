@@ -97,7 +97,21 @@ class Settings(BaseSettings):
     # Auth / JWT
     JWT_SECRET: str = "change-this-secret-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRY_MINUTES: int = 60 * 24 * 7   # 7 days
+    JWT_EXPIRY_MINUTES: int = 15             # access token lifetime (minutes)
+    JWT_ACCESS_EXPIRY_MINUTES: int = 15      # alias — used by create_access_token
+    JWT_REFRESH_EXPIRY_DAYS: int = 7         # refresh token lifetime (days)
+
+    # Account lockout
+    MAX_LOGIN_ATTEMPTS: int = 5              # failed attempts before lockout
+    LOCKOUT_MINUTES: int = 30               # lockout duration
+
+    # Upload limits
+    MAX_UPLOAD_SIZE_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
+
+    # Data retention (KVKK compliance)
+    RETENTION_ENABLED: bool = False
+    RAW_FILE_RETENTION_DAYS: int = 30        # delete raw uploads after N days
+    REPORT_RETENTION_DAYS: int = 1825        # null report data after 5 years
 
     # CORS — comma-separated list of allowed origins
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
