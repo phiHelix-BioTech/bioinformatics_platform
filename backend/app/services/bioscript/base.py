@@ -26,6 +26,10 @@ def get_bioscript_runner() -> BioScriptRunner:
         from app.services.bioscript.mock import MockBioScriptRunner
         return MockBioScriptRunner()
 
+    if settings.BIOSCRIPT_BACKEND == "local":
+        from app.services.bioscript.local import LocalBioScriptRunner
+        return LocalBioScriptRunner()
+
     if settings.BIOSCRIPT_BACKEND in ("aws", "awsbatch"):
         from app.services.bioscript.batch import AWSBatchBioScriptRunner
         return AWSBatchBioScriptRunner()
