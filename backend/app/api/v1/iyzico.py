@@ -28,6 +28,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.job import Job
 from app.models.user import User
+from app.services.tckn import validate_tckn
 from app.tasks.pipeline import run_pipeline
 
 router = APIRouter()
@@ -73,7 +74,7 @@ class IyzicoCheckoutRequest(BaseModel):
     buyer_country: str = "Turkey"
     buyer_zip: str = "34000"
     buyer_address: str = "Istanbul"
-    buyer_identity_number: str = "00000000000"  # TC Kimlik No (required by iyzico)
+    buyer_identity_number: str = "00000000000"  # TC Kimlik No — validated before submission
 
 
 class IyzicoCheckoutResponse(BaseModel):
@@ -89,6 +90,13 @@ async def iyzico_checkout(
 ):
     """Create an iyzico Checkout Form session. Returns embedded HTML form content."""
     import asyncio
+
+    # Validate TC Kimlik No if provided (skip the default placeholder)
+    tckn = body.buyer_identity_number.strip()
+    if tckn and tckn != "00000000000":
+        if not validate_tckn(tckn):
+            raise HTTPException(status_code=400, detail="Geçersiz TC Kimlik No.")
+
     options = _iyzico_options()
 
     # TRY amount — convert USD at approximate rate

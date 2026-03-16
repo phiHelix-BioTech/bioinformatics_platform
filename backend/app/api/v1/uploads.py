@@ -9,12 +9,24 @@ from app.config import settings
 from app.schemas.upload import PresignRequest, PresignResponse
 from app.services.cost_estimator import estimate
 from app.services.storage.base import get_storage_backend
+from app.services.vcf_validator import VCFValidationError, validate_vcf_bytes
 
 router = APIRouter()
+
+def _is_vcf_filename(filename: str) -> bool:
+    lower = filename.lower()
+    return lower.endswith(".vcf") or lower.endswith(".vcf.gz") or lower.endswith(".bcf")
 
 
 @router.post("/presign", response_model=PresignResponse)
 async def presign_upload(body: PresignRequest):
+    if body.file_size_bytes > settings.MAX_UPLOAD_SIZE_BYTES:
+        limit_gb = settings.MAX_UPLOAD_SIZE_BYTES / (1024 ** 3)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {limit_gb:.0f} GB.",
+        )
+
     ext = os.path.splitext(body.filename)[1].lower() or ".fastq"
     unique_name = f"{uuid.uuid4().hex}{ext}"
     storage_key = f"uploads/{unique_name}"
@@ -72,6 +84,20 @@ async def upload_local(filename: str, request: Request):
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty request body.")
+
+    if len(body) > settings.MAX_UPLOAD_SIZE_BYTES:
+        limit_gb = settings.MAX_UPLOAD_SIZE_BYTES / (1024 ** 3)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {limit_gb:.0f} GB.",
+        )
+
+    # Validate VCF header if this looks like a VCF file
+    if _is_vcf_filename(safe_filename):
+        try:
+            validate_vcf_bytes(body)
+        except VCFValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid VCF file: {exc}")
 
     with open(dest_path, "wb") as f:
         f.write(body)
