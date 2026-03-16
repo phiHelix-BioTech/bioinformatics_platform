@@ -39,6 +39,12 @@ jobs:
           mypy app --ignore-missing-imports --no-strict-optional || true
         # Allow mypy failures for now (non-blocking) — remove `|| true` to enforce
 
+      - name: Dependency vulnerability scan (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit --requirement requirements.txt --desc --skip-editable || true
+        # Non-blocking for now — remove `|| true` once all advisories are resolved
+
       - name: Run tests
         env:
           DATABASE_URL: "sqlite+aiosqlite:///./test.db"
