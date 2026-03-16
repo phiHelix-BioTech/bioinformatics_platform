@@ -335,3 +335,69 @@ async def cancel_job(
     await db.commit()
     await log_audit("job.cancel", user_id=current_user.id, resource_type="job", resource_id=job_id,
                     meta={"pipeline_id": job.pipeline_id})
+
+
+@router.get("/{job_id}/sv")
+async def get_sv_variants(
+    job_id: str,
+    svtype: str = Query("", description="Filter by SV type (DEL, DUP, INV, INS, BND, CNV — empty = all)"),
+    chrom: str = Query("", description="Filter by chromosome (empty = all)"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Parse a VCF result file and return structural variant / CNV records.
+
+    The job result must have a file with path ending in ``.vcf`` or ``.vcf.gz``
+    accessible via the local storage backend, or be a completed VCF-type job.
+    Supports DEL, DUP, INV, INS, BND, CNV, TRA record types.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if job is None or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    job_result = job.result
+    if isinstance(job_result, str):
+        try:
+            job_result = json.loads(job_result)
+        except Exception:
+            job_result = None
+
+    if not job_result:
+        raise HTTPException(status_code=422, detail="Job has no result data yet.")
+
+    # Find a VCF file path in the result
+    vcf_path: str | None = None
+    for f in job_result.get("files", []):
+        p = f.get("path", "")
+        if p.endswith(".vcf") or p.endswith(".vcf.gz"):
+            # Strip s3:// prefix for local backend; local paths start with /
+            if p.startswith("/"):
+                vcf_path = p
+            break
+
+    if not vcf_path:
+        raise HTTPException(status_code=422, detail="No VCF file found in job results.")
+
+    from app.services.sv_parser import parse_sv_vcf
+    all_records = parse_sv_vcf(vcf_path)
+
+    if svtype:
+        all_records = [r for r in all_records if r["svtype"] == svtype.upper()]
+    if chrom:
+        all_records = [r for r in all_records if r["chrom"] == chrom]
+
+    total = len(all_records)
+    page = all_records[offset: offset + limit]
+
+    return {
+        "variants": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": offset + len(page) if offset + len(page) < total else None,
+        "sv_types": sorted({r["svtype"] for r in all_records}),
+        "chroms": sorted({r["chrom"] for r in all_records}),
+    }
