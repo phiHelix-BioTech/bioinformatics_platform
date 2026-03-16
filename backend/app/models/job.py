@@ -37,3 +37,4 @@ class Job(Base):
     storage_key_r2: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     workflow_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     job_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sample_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)

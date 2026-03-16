@@ -7,3 +7,5 @@ from app.models.nfcore_pipeline import NfCorePipeline  # noqa: F401
 from app.models.nfcore_module import NfCoreModule  # noqa: F401
 from app.models.snakemake_wrapper import SnakemakeWrapper  # noqa: F401
 from app.models.snakemake_workflow import SnakemakeWorkflow  # noqa: F401
+from app.models.patient import Patient  # noqa: F401
+from app.models.sample import Sample  # noqa: F401
