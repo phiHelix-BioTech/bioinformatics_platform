@@ -139,7 +139,7 @@ bioinformatics_platform/
 │   │   ├── models/                # User, Job, Pipeline, NfCorePipeline,
 │   │   │   │                      #   NfCoreModule, SnakemakeWrapper,
 │   │   │   │                      #   SnakemakeWorkflow, AuditLog,
-│   │   │   │                      #   ConsentRecord
+│   │   │   │                      #   ConsentRecord, Patient, Sample
 │   │   ├── schemas/               # Pydantic request / response models
 │   │   ├── services/
 │   │   │   ├── storage/           # local.py + s3.py (S3-endpoint-aware)
@@ -148,11 +148,13 @@ bioinformatics_platform/
 │   │   │   ├── bioscript/         # mock, local, batch (AWS), turkishcloud
 │   │   │   ├── vm_provisioner/    # base, huawei, turkcell, cloudsigma,
 │   │   │   │   │                  #   factory (fallback), runner (shared)
-│   │   │   ├── assessment/        # real.py + databases.py + report.py
+│   │   │   ├── assessment/        # real.py + databases.py + report.py (+ SHA-256 hash)
+│   │   │   ├── tckn.py            # TC Kimlik No checksum validator
+│   │   │   ├── vcf_validator.py   # VCF header validator (plain + gzip)
 │   │   │   ├── sv_parser.py       # structural variant VCF parser
 │   │   │   ├── audit.py           # fire-and-forget audit log writer
-│   │   │   └── auth.py            # JWT creation/verification + MFA tokens
-│   │   ├── tasks/                 # Celery tasks: pipeline, scrape_*
+│   │   │   └── auth.py            # JWT + refresh tokens + MFA tokens
+│   │   ├── tasks/                 # Celery tasks: pipeline, scrape_*, retention
 │   │   ├── config.py              # All env vars (Pydantic Settings)
 │   │   └── main.py                # Sentry init + Prometheus + health check
 │   ├── Dockerfile
@@ -257,14 +259,18 @@ Set `DEFAULT_VM_FLAVOR=standard` (default) or pass `tier` in `workflow_config` p
 
 ### Authentication
 
-- JWT bearer tokens (7-day expiry by default, configurable)
-- RBAC: `role` field on every user — `user`, `clinician`, `admin`
-- MFA/TOTP via `pyotp` — compatible with any authenticator app (Google Authenticator, Authy, etc.)
+- **Short-lived JWT access tokens** (15 min default) paired with **Redis-backed refresh tokens** (7 days). The `/auth/refresh` endpoint issues a new pair and revokes the old refresh token on every call (rotation).
+- **Email verification** — a signed token is emailed on registration; account is marked verified at `GET /auth/verify-email?token=…`
+- **Password reset** — `POST /auth/forgot-password` (always returns 202 to prevent email enumeration); `POST /auth/reset-password` with a 1-hour expiring token
+- **Account lockout** — after `MAX_LOGIN_ATTEMPTS` (default 5) consecutive failures the account is locked for `LOCKOUT_MINUTES` (default 30). Resets on successful login or password reset.
+- **RBAC**: `role` field on every user — `user`, `clinician`, `admin`
+- **MFA/TOTP** via `pyotp` — compatible with any authenticator app (Google Authenticator, Authy, etc.)
   - `POST /auth/mfa/setup` → provisioning URI + QR data
   - `POST /auth/mfa/verify` → activate MFA with a valid code
   - `POST /auth/mfa/complete` → exchange MFA token + code for a full JWT (called at login challenge screen)
   - `DELETE /auth/mfa` → disable
 - Login with MFA enabled returns `mfa_required: true` + a short-lived (5 min) `mfa_token` instead of a full JWT
+- `POST /auth/logout` revokes the refresh token immediately
 
 ### RBAC
 
@@ -291,6 +297,13 @@ Turkey's personal data protection law (KVKK) applies to all health data processe
 - **Consent records** — `POST /auth/consent` records explicit KVKK consent per user per consent type (e.g. `"kvkk"`, `"marketing"`). Upsert semantics; full audit trail.
 - **Data residency** — `data_residency` field on User (default `"TR"`). Turkish cloud infrastructure keeps compute and storage physically in Turkey.
 - **Right to erasure** — `DELETE /auth/me` deletes the user, all their jobs, and queues S3 object deletion (KVKK Article 7 + GDPR Article 17).
+- **Automated data retention** — a daily Celery beat task (`run_retention`) enforces configurable windows:
+  - Raw upload files deleted after `RAW_FILE_RETENTION_DAYS` (default 30 days)
+  - Report result JSON nulled after `REPORT_RETENTION_DAYS` (default 1825 days / 5 years)
+  - Enable with `RETENTION_ENABLED=true`
+- **TC Kimlik No validation** — the TCKN checksum algorithm (11-digit modulo verification) is applied to buyer identity numbers before submission to the iyzico payment gateway. Invalid numbers are rejected with a 400 error.
+- **VCF file validation** — uploaded `.vcf` / `.vcf.gz` / `.bcf` files are checked for a valid `##fileformat=VCF` header and `#CHROM` line before being stored. Malformed files are rejected at upload time.
+- **Upload size limit** — all uploads are capped at `MAX_UPLOAD_SIZE_BYTES` (default 10 GB).
 - **VERBİS** — Register your data processing activities at [verbis.kvkk.gov.tr](https://verbis.kvkk.gov.tr) before going live. Health data is a special category under KVKK Article 6 — explicit consent is required.
 
 ### BioScript sandboxing
@@ -309,6 +322,42 @@ In local runner mode, OS-level limits are also applied via `resource.setrlimit`:
 - Virtual memory: 8 GB
 - File size: 10 GB
 - Processes: 256
+
+---
+
+## Patient & Sample Management
+
+The platform includes a structured clinical data model for linking genomic jobs to real patients and biological samples.
+
+### Hierarchy
+
+```
+User
+ └── Patient  (name, date of birth, sex, notes)
+      └── Sample  (sample_type, collection_date, description)
+           └── Job  (pipeline run — sarek, assessment, etc.)
+```
+
+### Clinical use
+
+- Create a patient record before uploading data — `POST /patients`
+- Create a sample tied to the patient — `POST /patients/{id}/samples`
+- Attach the sample to a job by passing `sample_id` in the job create request
+- Retrieve all jobs ever run on a patient — `GET /patients/{id}/jobs`
+
+### FHIR R4 export
+
+Both Patient and Specimen resources can be exported as standard FHIR R4 JSON:
+
+```bash
+# FHIR Patient resource
+GET /api/v1/patients/{patient_id}/fhir
+
+# FHIR Specimen resource
+GET /api/v1/patients/{patient_id}/samples/{sample_id}/fhir
+```
+
+These are plain JSON responses — no FHIR server required. They can be imported into any FHIR-compatible EHR (HAPI FHIR, Microsoft Azure Health Data Services, etc.).
 
 ---
 
@@ -365,6 +414,7 @@ The Assessment pipeline takes a completed sarek job's VCF output and annotates e
 - **Table A** — ClinVar significance, InterVar/ACMG classification + criteria, gnomAD AF, popmax AF, hotspot flag, rsID
 - **Table B** — SIFT, PolyPhen-2, CADD phred, REVEL, MetaLR, MetaSVM, MutationTaster, SpliceAI Δmax, GERP++, PhyloP
 - **Table C** — protein name + function (UniProt), OMIM disease, ClinGen validity, GenCC, Orphanet diseases, HPO terms, LOVD variant count
+- **Report signing** — a SHA-256 digest of the PDF bytes is computed after generation and stored in the job result (`report_sha256`). Retrieve it at `GET /jobs/{id}` to verify the report has not been tampered with.
 
 ### Variant-level databases (queried per variant, all free)
 
@@ -406,10 +456,15 @@ All endpoints under `/api/v1`. JWT required in `Authorization: Bearer <token>` e
 
 ```
 # Auth
-POST   /auth/register                 Register
-POST   /auth/login                    Login → JWT (or mfa_required + mfa_token)
+POST   /auth/register                 Register (sends verification email)
+POST   /auth/login                    Login → JWT + refresh token (or mfa_required)
 GET    /auth/me                       Current user
 DELETE /auth/me                       Delete account (KVKK right to erasure)
+POST   /auth/refresh                  Exchange refresh token → new access + refresh token
+POST   /auth/logout                   Revoke refresh token
+GET    /auth/verify-email?token=…     Verify email address
+POST   /auth/forgot-password          Send password reset email
+POST   /auth/reset-password           Set new password with reset token
 POST   /auth/mfa/setup                Generate TOTP secret + provisioning URI
 POST   /auth/mfa/verify               Activate MFA with first valid code
 POST   /auth/mfa/complete             Exchange mfa_token + code → full JWT
@@ -418,7 +473,7 @@ POST   /auth/consent                  Record KVKK/GDPR consent
 GET    /auth/consent                  List consent records
 
 # Uploads
-POST   /uploads/presign               Presigned upload URL + cost estimate
+POST   /uploads/presign               Presigned upload URL + cost estimate (size-checked)
 GET    /uploads/estimate              Cost estimate
 GET    /uploads/local/{filename}      Serve local file (PDF reports etc.)
 
@@ -454,6 +509,21 @@ POST   /payments/iyzico/checkout      iyzico CheckoutFormInitialize
 POST   /payments/iyzico/callback      iyzico result callback
 GET    /payments/iyzico/session/{token} Poll for job_id after iyzico payment
 
+# Patients & Samples
+POST   /patients                      Create patient
+GET    /patients                      List patients
+GET    /patients/{id}                 Get patient
+PUT    /patients/{id}                 Update patient
+DELETE /patients/{id}                 Delete patient
+GET    /patients/{id}/fhir            FHIR R4 Patient resource (JSON)
+POST   /patients/{id}/samples         Create sample
+GET    /patients/{id}/samples         List samples for patient
+GET    /patients/{id}/samples/{sid}   Get sample
+PUT    /patients/{id}/samples/{sid}   Update sample
+DELETE /patients/{id}/samples/{sid}   Delete sample
+GET    /patients/{id}/samples/{sid}/fhir  FHIR R4 Specimen resource (JSON)
+GET    /patients/{id}/jobs            All jobs linked to this patient
+
 # System
 GET    /health                        DB + Redis connectivity check
 GET    /metrics                       Prometheus metrics (text/plain)
@@ -470,6 +540,14 @@ Copy `backend/.env.example` to `.env`. Key groups:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JWT_SECRET` | `changeme-…` | **Change in production.** Min 32 random chars. |
+| `JWT_ACCESS_EXPIRY_MINUTES` | `15` | Access token lifetime in minutes |
+| `JWT_REFRESH_EXPIRY_DAYS` | `7` | Refresh token lifetime in days (stored in Redis) |
+| `MAX_LOGIN_ATTEMPTS` | `5` | Failed attempts before account lockout |
+| `LOCKOUT_MINUTES` | `30` | Lockout duration after too many failed attempts |
+| `MAX_UPLOAD_SIZE_BYTES` | `10737418240` | Maximum upload size (default 10 GB) |
+| `RETENTION_ENABLED` | `false` | Enable automated data retention (KVKK) |
+| `RAW_FILE_RETENTION_DAYS` | `30` | Days before raw upload files are deleted |
+| `REPORT_RETENTION_DAYS` | `1825` | Days before report result data is nulled (5 years) |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated CORS origins |
 | `MFA_ISSUER` | `BioplatformMD` | Issuer name shown in authenticator apps |
 | `DEBUG` | `true` | Set `false` in production (enforces JWT_SECRET check) |
@@ -599,6 +677,8 @@ Migrations run automatically at startup (`alembic upgrade head`).
 | 0012 | Create audit_log table |
 | 0013 | Add mfa_secret, mfa_enabled, data_residency to users |
 | 0014 | Create consent_records table (KVKK) |
+| 0015 | Add email_verified, password_reset, failed_login_attempts, locked_until to users |
+| 0016 | Create patients + samples tables; add sample_id to jobs |
 
 ---
 
