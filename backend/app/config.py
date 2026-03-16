@@ -76,6 +76,18 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SES_REGION: str = ""                 # defaults to AWS_REGION if empty
 
+    # iyzico (Turkish payment gateway)
+    IYZICO_API_KEY: str = ""
+    IYZICO_SECRET_KEY: str = ""
+    IYZICO_BASE_URL: str = "https://sandbox.iyzipay.com"
+    IYZICO_USD_TO_TRY_RATE: float = 33.0
+
+    # MFA / TOTP
+    MFA_ISSUER: str = "BioplatformMD"
+
+    # Sentry
+    SENTRY_DSN: str = ""
+
     # Runtime mode
     DEBUG: bool = True
 

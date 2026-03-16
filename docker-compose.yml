@@ -60,6 +60,12 @@ services:
       ASSESSMENT_GENOME: ${ASSESSMENT_GENOME:-hg38}
       OMIM_API_KEY: ${OMIM_API_KEY:-}
       ORPHANET_API_KEY: ${ORPHANET_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      IYZICO_API_KEY: ${IYZICO_API_KEY:-}
+      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY:-}
+      IYZICO_BASE_URL: ${IYZICO_BASE_URL:-https://sandbox.iyzipay.com}
+      IYZICO_USD_TO_TRY_RATE: ${IYZICO_USD_TO_TRY_RATE:-33.0}
+      MFA_ISSUER: ${MFA_ISSUER:-BioplatformMD}
     volumes:
       - uploads_data:/uploads
       - ./backend:/app
@@ -102,6 +108,8 @@ services:
       ASSESSMENT_GENOME: ${ASSESSMENT_GENOME:-hg38}
       OMIM_API_KEY: ${OMIM_API_KEY:-}
       ORPHANET_API_KEY: ${ORPHANET_API_KEY:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      MFA_ISSUER: ${MFA_ISSUER:-BioplatformMD}
     volumes:
       - uploads_data:/uploads
       - outputs_data:/outputs
